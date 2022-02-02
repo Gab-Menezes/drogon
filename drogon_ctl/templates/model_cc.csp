@@ -1557,120 +1557,66 @@ if(!col.notNull_){%>
     }
     return true;
 }
+
 <%c++
-for(auto &relationship : relationships)
-{
-    if(relationship.targetKey().empty() || relationship.originalKey().empty())
-        {
+    for(auto &relationship : relationships)
+    {
+        if(relationship.invalid())
             continue;
-        }
+
         auto &name=relationship.targetTableName();
         auto relationshipClassName=nameTransform(name, true);
-        auto relationshipValName=nameTransform(name, false);
+
         auto alias=relationship.targetTableAlias();
-        auto aliasValName=nameTransform(alias, false);
+
+        std::string finalRelationshipName=relationshipClassName;
+        if(!alias.empty())
+        {
+            finalRelationshipName = alias;
+            finalRelationshipName[0] = std::toupper(finalRelationshipName[0]);
+        }
+        std::string finalRelationshipInde(relationshipClassName.length(), ' ');
+
+        //we do this because if one table references twice the same table the eager loading doens't work
+        //so we can differentiate the eager loading by the their original key
+        std::string finalEagerLoadingName=relationship.eagerLoadingName(true);
+
         if(relationship.type() == Relationship::Type::HasOne)
         {
-            if(!alias.empty())
-            {
-                if(alias[0] <= 'z' && alias[0] >= 'a')
-                {
-                    alias[0] += ('A' - 'a');
-                }
-                std::string alind(alias.length(), ' ');
 %>
-void [[className]]::get{%alias%}(const DbClientPtr &clientPtr,
-     {%indentStr%}     {%alind%} const std::function<void({%relationshipClassName%})> &rcb,
-     {%indentStr%}     {%alind%} const ExceptionCallback &ecb) const
-<%c++
-            }
-            else
-            {
-                std::string relationshipClassInde(relationshipClassName.length(), ' ');
-%>
-void [[className]]::get{%relationshipClassName%}(const DbClientPtr &clientPtr,
-     {%indentStr%}     {%relationshipClassInde%} const std::function<void({%relationshipClassName%})> &rcb,
-     {%indentStr%}     {%relationshipClassInde%} const ExceptionCallback &ecb) const
-<%c++
-            }
-%>
+void [[className]]::get{%finalRelationshipName%}(const DbClientPtr &clientPtr,
+     {%indentStr%}     {%finalRelationshipInde%} const std::function<void({%relationshipClassName%})> &rcb,
+     {%indentStr%}     {%finalRelationshipInde%} const ExceptionCallback &ecb) const
 {
-    const static std::string sql = "select * from {%name%} where {%relationship.targetKey()%} = <%c++
-            if(rdbms=="postgresql")
-            {
-                $$<<"$1";
-            }
-            else
-            {
-                $$<<"?";
-            }%>";
-    *clientPtr << sql
-               << *{%nameTransform(relationship.originalKey(), false)%}_
-               >> [rcb = std::move(rcb), ecb](const Result &r){
-                    if (r.size() == 0)
-                    {
-                        ecb(UnexpectedRows("0 rows found"));
-                    }
-                    else if (r.size() > 1)
-                    {
-                        ecb(UnexpectedRows("Found more than one row"));
-                    }
-                    else
-                    {
-                        rcb({%relationshipClassName%}(r[0]));
-                    }
-               }
-               >> ecb;
+    Mapper<{%relationshipClassName%}> mp(clientPtr);
+    mp.findBy(Criteria({%relationshipClassName%}::Cols::_{%relationship.targetKey()%}, CompareOperator::EQ, *{%nameTransform(relationship.originalKey(), false)%}_),
+    [rcb, ecb](const std::vector<{%relationshipClassName%}>& r) {
+        if (r.empty())
+        {
+            ecb(UnexpectedRows("0 rows found"));
+        }
+        else if (r.size() > 1)
+        {
+            ecb(UnexpectedRows("Found more than one row"));
+        }
+        else
+        {
+            rcb(r[0]);
+        }
+    },
+    ecb);
 }
 <%c++
         }
         else if(relationship.type() == Relationship::Type::HasMany)
         {
-            if(!alias.empty())
-            {
-                if(alias[0] <= 'z' && alias[0] >= 'a')
-                {
-                    alias[0] += ('A' - 'a');
-                }
-                std::string alind(alias.length(), ' ');
 %>
-void [[className]]::get{%alias%}(const DbClientPtr &clientPtr,
-     {%indentStr%}     {%alind%} const std::function<void(std::vector<{%relationshipClassName%}>)> &rcb,
-     {%indentStr%}     {%alind%} const ExceptionCallback &ecb) const
-<%c++
-            }
-            else
-            {
-                std::string relationshipClassInde(relationshipClassName.length(), ' ');
-%>
-void [[className]]::get{%relationshipClassName%}(const DbClientPtr &clientPtr,
-     {%indentStr%}     {%relationshipClassInde%} const std::function<void(std::vector<{%relationshipClassName%}>)> &rcb,
-     {%indentStr%}     {%relationshipClassInde%} const ExceptionCallback &ecb) const
-<%c++
-            }
-%>
+void [[className]]::get{%finalRelationshipName%}(const DbClientPtr &clientPtr,
+     {%indentStr%}     {%finalRelationshipInde%} const std::function<void(std::vector<{%relationshipClassName%}>)> &rcb,
+     {%indentStr%}     {%finalRelationshipInde%} const ExceptionCallback &ecb) const
 {
-    const static std::string sql = "select * from {%name%} where {%relationship.targetKey()%} = <%c++
-            if(rdbms=="postgresql")
-            {
-                $$<<"$1";
-            }
-            else
-            {
-                $$<<"?";
-            }%>";
-    *clientPtr << sql
-               << *{%nameTransform(relationship.originalKey(), false)%}_
-               >> [rcb = std::move(rcb)](const Result &r){
-                   std::vector<{%relationshipClassName%}> ret;
-                   ret.reserve(r.size());
-                   for (auto const &row : r)
-                   {
-                       ret.emplace_back({%relationshipClassName%}(row));
-                   }
-                   rcb(ret);
-               }
-               >> ecb;
+    Mapper<{%relationshipClassName%}> mp(clientPtr);
+    mp.findBy(Criteria({%relationshipClassName%}::Cols::_{%relationship.targetKey()%}, CompareOperator::EQ, *{%nameTransform(relationship.originalKey(), false)%}_), rcb, ecb);
 }
 <%c++
         }
@@ -1680,29 +1626,10 @@ void [[className]]::get{%relationshipClassName%}(const DbClientPtr &clientPtr,
             auto pivotTableClassName=nameTransform(pivotTableName, true);
             auto &pivotOriginalKey=relationship.pivotTable().originalKey();
             auto &pivotTargetKey=relationship.pivotTable().targetKey();
-            if(!alias.empty())
-            {
-                if(alias[0] <= 'z' && alias[0] >= 'a')
-                {
-                    alias[0] += ('A' - 'a');
-                }
-                std::string alind(alias.length(), ' ');
 %>
-void [[className]]::get{%alias%}(const DbClientPtr &clientPtr,
-     {%indentStr%}     {%alind%} const std::function<void(std::vector<std::pair<{%relationshipClassName%},{%pivotTableClassName%}>>)> &rcb,
-     {%indentStr%}     {%alind%} const ExceptionCallback &ecb) const
-<%c++
-            }
-            else
-            {
-                std::string relationshipClassInde(relationshipClassName.length(), ' ');
-%>
-void [[className]]::get{%relationshipClassName%}(const DbClientPtr &clientPtr,
-     {%indentStr%}     {%relationshipClassInde%} const std::function<void(std::vector<std::pair<{%relationshipClassName%},{%pivotTableClassName%}>>)> &rcb,
-     {%indentStr%}     {%relationshipClassInde%} const ExceptionCallback &ecb) const
-<%c++
-            }
-%>
+void [[className]]::get{%finalRelationshipName%}(const DbClientPtr &clientPtr,
+     {%indentStr%}     {%finalRelationshipInde%} const std::function<void(std::vector<std::pair<{%relationshipClassName%},{%pivotTableClassName%}>>)> &rcb,
+     {%indentStr%}     {%finalRelationshipInde%} const ExceptionCallback &ecb) const
 {
     const static std::string sql = "select * from {%name%},{%pivotTableName%} where {%pivotTableName%}.{%pivotOriginalKey%} = <%c++
             if(rdbms=="postgresql")

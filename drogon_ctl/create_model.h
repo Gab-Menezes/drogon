@@ -261,6 +261,7 @@ class Relationship
             }
             pivotTable_ = PivotTable(pivot);
         }
+        simpleEagerLoading_ = relationship.get("simple_eager_loading", true).asBool();
     }
     Relationship() = default;
     Relationship reverse() const
@@ -282,6 +283,7 @@ class Relationship
         r.targetKey_ = originalKey_;
         r.enableReverse_ = enableReverse_;
         r.pivotTable_ = pivotTable_.reverse();
+        r.simpleEagerLoading_ = simpleEagerLoading_;
         return r;
     }
     Type type() const
@@ -320,6 +322,22 @@ class Relationship
     {
         return pivotTable_;
     }
+    bool simpleEagerLoading() const
+    {
+        return simpleEagerLoading_;
+    }
+    const std::string eagerLoadingName(bool cammel) const
+    {
+        std::string tmp = nameTransform(targetTableName(), cammel);
+        if (!simpleEagerLoading())
+            tmp += "By" + nameTransform(originalKey(), true);
+
+        return tmp;
+    }
+    bool invalid() const
+    {
+        return targetKey().empty() || originalKey().empty();
+    }
 
   private:
     Type type_{Type::HasOne};
@@ -331,6 +349,7 @@ class Relationship
     std::string targetKey_;
     bool enableReverse_{false};
     PivotTable pivotTable_;
+    bool simpleEagerLoading_{true};
 };
 class create_model : public DrObject<create_model>, public CommandHandler
 {

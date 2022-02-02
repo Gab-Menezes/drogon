@@ -205,93 +205,58 @@ auto cols=@@.get<std::vector<ColumnInfo>>("columns");
     Json::Value toMasqueradedJson(const std::vector<std::string> &pMasqueradingVector) const;
     /// Relationship interfaces
 <%c++
+    //vector containing the class and name for the cache variables
     for(auto &relationship : relationships)
     {
-        if(relationship.targetKey().empty() || relationship.originalKey().empty())
-        {
+        if(relationship.invalid())
             continue;
-        }
+
         auto &name=relationship.targetTableName();
         auto relationshipClassName=nameTransform(name, true);
-        auto relationshipValName=nameTransform(name, false);
+
         auto alias=relationship.targetTableAlias();
-        auto aliasValName=nameTransform(alias, false);
+
+        std::string finalRelationshipName=relationshipClassName;
+        if(!alias.empty())
+        {
+            finalRelationshipName = alias;
+            finalRelationshipName[0] = std::toupper(finalRelationshipName[0]);
+        }
+        std::string finalRelationshipInde(relationshipClassName.length(), ' ');
+
+        //we do this because if one table references twice the same table the eager loading doens't work
+        //so we can differentiate the eager loading by the their original key
+        std::string finalEagerLoadingName=relationship.eagerLoadingName(true);
+%>
+    static void load{%finalEagerLoadingName%}(const drogon::orm::DbClientPtr &clientPtr, std::vector<[[className]]>& targets);
+    static void load{%finalEagerLoadingName%}(const drogon::orm::DbClientPtr &clientPtr, std::vector<[[className]]>& targets, const std::function<void(std::vector<{%relationshipClassName%}>&)>& rcb);
+<%c++
+
         if(relationship.type() == Relationship::Type::HasOne)
         {
-            if(!alias.empty())
-            {
-                if(alias[0] <= 'z' && alias[0] >= 'a')
-                {
-                    alias[0] += ('A' - 'a');
-                }
-                std::string alind(alias.length(), ' ');
 %>
-    void get{%alias%}(const drogon::orm::DbClientPtr &clientPtr,
-            {%alind%} const std::function<void({%relationshipClassName%})> &rcb,
-            {%alind%} const drogon::orm::ExceptionCallback &ecb) const;
+    void get{%finalRelationshipName%}(const drogon::orm::DbClientPtr &clientPtr,
+            {%finalRelationshipInde%} const std::function<void({%relationshipClassName%})> &rcb,
+            {%finalRelationshipInde%} const drogon::orm::ExceptionCallback &ecb) const;
 <%c++
-            }
-            else
-            {
-                std::string relationshipClassInde(relationshipClassName.length(), ' ');
-%>
-    void get{%relationshipClassName%}(const drogon::orm::DbClientPtr &clientPtr,
-            {%relationshipClassInde%} const std::function<void({%relationshipClassName%})> &rcb,
-            {%relationshipClassInde%} const drogon::orm::ExceptionCallback &ecb) const;
-<%c++
-            }
         }
         else if(relationship.type() == Relationship::Type::HasMany)
         {
-            if(!alias.empty())
-            {
-                if(alias[0] <= 'z' && alias[0] >= 'a')
-                {
-                    alias[0] += ('A' - 'a');
-                }
-                std::string alind(alias.length(), ' ');
 %>
-    void get{%alias%}(const drogon::orm::DbClientPtr &clientPtr,
-            {%alind%} const std::function<void(std::vector<{%relationshipClassName%}>)> &rcb,
-            {%alind%} const drogon::orm::ExceptionCallback &ecb) const;
+    void get{%finalRelationshipName%}(const drogon::orm::DbClientPtr &clientPtr,
+            {%finalRelationshipInde%} const std::function<void(std::vector<{%relationshipClassName%}>)> &rcb,
+            {%finalRelationshipInde%} const drogon::orm::ExceptionCallback &ecb) const;
 <%c++
-            }
-            else
-            {
-                std::string relationshipClassInde(relationshipClassName.length(), ' ');
-%>
-    void get{%relationshipClassName%}(const drogon::orm::DbClientPtr &clientPtr,
-            {%relationshipClassInde%} const std::function<void(std::vector<{%relationshipClassName%}>)> &rcb,
-            {%relationshipClassInde%} const drogon::orm::ExceptionCallback &ecb) const;
-<%c++
-            }
         }
         else if(relationship.type() == Relationship::Type::ManyToMany)
         {
             auto &pivotTableName=relationship.pivotTable().tableName();
             auto pivotTableClassName=nameTransform(pivotTableName, true);
-            if(!alias.empty())
-            {
-                if(alias[0] <= 'z' && alias[0] >= 'a')
-                {
-                    alias[0] += ('A' - 'a');
-                }
-                std::string alind(alias.length(), ' ');
 %>
-    void get{%alias%}(const drogon::orm::DbClientPtr &clientPtr,
-            {%alind%} const std::function<void(std::vector<std::pair<{%relationshipClassName%},{%pivotTableClassName%}>>)> &rcb,
-            {%alind%} const drogon::orm::ExceptionCallback &ecb) const;
+    void get{%finalRelationshipName%}(const drogon::orm::DbClientPtr &clientPtr,
+            {%finalRelationshipInde%} const std::function<void(std::vector<std::pair<{%relationshipClassName%},{%pivotTableClassName%}>>)> &rcb,
+            {%finalRelationshipInde%} const drogon::orm::ExceptionCallback &ecb) const;
 <%c++
-            }
-            else
-            {
-                std::string relationshipClassInde(relationshipClassName.length(), ' ');
-%>
-    void get{%relationshipClassName%}(const drogon::orm::DbClientPtr &clientPtr,
-            {%relationshipClassInde%} const std::function<void(std::vector<std::pair<{%relationshipClassName%},{%pivotTableClassName%}>>)> &rcb,
-            {%relationshipClassInde%} const drogon::orm::ExceptionCallback &ecb) const;
-<%c++
-            }
         }
     }
 %>
@@ -312,7 +277,23 @@ auto cols=@@.get<std::vector<ColumnInfo>>("columns");
         if(!col.colType_.empty())
             $$<<"    std::shared_ptr<"<<col.colType_<<"> "<<col.colValName_<<"_;\n";
     }
-    %>
+%>
+    // Relationship cache
+<%c++
+    for(auto &relationship : relationships)
+    {
+        if(relationship.invalid())
+            continue;
+
+        auto relationshipClassName=nameTransform(relationship.targetTableName(), true);
+        auto eagerLoadingNameVariable="r_"+relationship.eagerLoadingName(false);
+
+        if(relationship.type() == Relationship::Type::HasOne)
+            $$<<"    std::shared_ptr<"<<relationshipClassName<<"> "<<eagerLoadingNameVariable<<"_;\n";
+        if(relationship.type() == Relationship::Type::HasMany)
+            $$<<"    std::shared_ptr<std::vector<"<<relationshipClassName<<">> "<<eagerLoadingNameVariable<<"_;\n";
+    }
+%>
     struct MetaData
     {
         const std::string colName_;
